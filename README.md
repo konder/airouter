@@ -225,21 +225,3 @@ npm test         # vitest
 npm run build    # tsc 输出到 dist/
 ```
 
-## 在另一台电脑安装
-
-如果该机器有 Node 22+ 和 git：
-
-```bash
-npm install -g git+https://github.com/konder/airouter.git
-mkdir -p ~/.airouter
-scp 原机器:~/.airouter/config.yaml ~/.airouter/config.yaml   # 可选：搬配置 + key
-airouter daemon start
-airouter tui                                                  # 没搬配置就在这里手动加上游
-```
-
-要更新到最新版：
-
-```bash
-npm install -g git+https://github.com/konder/airouter.git
-airouter daemon restart
-```
