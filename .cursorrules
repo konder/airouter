@@ -1,0 +1,42 @@
+# AI Router - Project Rules
+
+## Overview
+Local AI API gateway that manages multiple upstream LLM providers (OpenAI, Anthropic) with automatic failover, load balancing, and routing rules.
+
+## Tech Stack
+- **Runtime:** Node.js 18+ with TypeScript (ES2022, ESM)
+- **HTTP Framework:** Hono v4 + @hono/node-server
+- **Config:** YAML (config.yaml)
+- **Testing:** Vitest v2
+- **Dev:** tsx (watch mode)
+
+## Project Structure
+```
+src/
+├── index.ts              # Hono app entry + server
+├── config/index.ts       # Load/validate config.yaml
+├── types/index.ts        # TypeScript interfaces
+├── services/
+│   ├── upstream.ts       # UpstreamManager (state, CRUD, latency)
+│   ├── router.ts         # RequestRouter (strategies)
+│   └── converter.ts      # OpenAI <-> Anthropic format helpers
+├── routes/
+│   ├── openai.ts         # POST /v1/chat/completions, GET /v1/models
+│   ├── anthropic.ts      # POST /v1/messages
+│   └── admin.ts          # /admin/* REST API
+├── tui/index.ts          # Legacy TUI client (blessed)
+└── __tests__/            # Vitest test files
+```
+
+## Development Rules
+1. **TDD:** Write tests first, then implement. Run `npm test` after changes.
+2. **Node version:** Use Node 18 (`nvm use 18`).
+3. **Scripts:** `npm run dev` (watch), `npm test` (vitest run), `npm run test:watch` (vitest).
+4. **Admin UI:** TUI (`npm run tui`) uses full-screen page-switching (not modal overlays).
+5. **API paths:** Gateway routes mount at `/v1`, admin routes at `/admin`, dashboard at `/dashboard`.
+
+## Key Patterns
+- `UpstreamManager` is a singleton managing all upstream state in-memory.
+- `RequestRouter` implements strategy pattern (load-balance, rules, manual).
+- Config is loaded from `config.yaml` at startup, can be persisted via `POST /admin/config/save`.
+- Web dashboard uses vanilla JS (no build step) calling `/admin/*` REST endpoints.
