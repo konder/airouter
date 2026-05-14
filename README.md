@@ -81,7 +81,31 @@ airouter tui                   打开终端管理界面
 airouter --version             版本
 ```
 
-运行时文件在 `~/.airouter/`：`config.yaml` / `airouter.pid` / `airouter.log`。
+运行时文件在 `~/.airouter/`：`config.yaml` / `keys.yaml` / `airouter.pid` / `airouter.log`。
+
+## 客户端鉴权
+
+Daemon 默认对 `/v1/*` 强制鉴权 — 客户端发的 `Authorization: Bearer <key>` 或 `x-api-key: <key>` 必须在 `~/.airouter/keys.yaml` 里。`/admin/*` 不鉴权（监听 127.0.0.1）。
+
+**首次启动**：如果没有 `keys.yaml`，daemon 自动颁发一个 `default` key 并打印到日志：
+
+```
+[airouter] No client API keys found — issued default key:
+[airouter]   air_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+[airouter] Save it now. Future starts will not print it again.
+```
+
+之后通过 TUI 管理：`airouter tui` → `[k]` 进入 keys 页面 → `[a]` 颁发新 key（**完整值只在弹窗显示一次**） / `[d]` 撤销。
+
+> **从老版本升级**：原本 daemon 接受任意字符串作为 key，升级后会拒绝。把客户端的 `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` 换成日志里那个 `air_xxx`，或自己用 TUI 颁一个新的。
+
+REST：
+
+```bash
+curl http://localhost:3000/admin/keys                    # 列出（masked）
+curl -X POST http://localhost:3000/admin/keys -d '{"name":"my-laptop"}' -H 'Content-Type: application/json'   # 颁发
+curl -X DELETE http://localhost:3000/admin/keys/my-laptop  # 撤销
+```
 
 ## 配置
 
@@ -201,7 +225,10 @@ curl -X POST http://localhost:3000/admin/config/save
 | `d` | 删除 |
 | `m` | 测量延迟 |
 | `r` | 切换路由策略 |
+| `k` | 进入 client key 管理页 |
 | `q` | 退出 |
+
+Keys 页面：`[a]` 颁发，`[d]` 撤销，`[Esc]` 返回。
 
 表单内：`↑/↓` 切字段，`Enter` 进入编辑（`Type` / `Auth Style` 弹选项菜单），`Esc` 取消。
 

@@ -2,7 +2,13 @@ import { Hono } from 'hono';
 import { upstreamManager } from '../services/upstream.ts';
 import { requestRouter } from '../services/router.ts';
 import { getConfig } from '../config/index.ts';
+import { keysManager } from '../services/keys.ts';
 import type { Upstream } from '../types/index.ts';
+
+function maskKey(v: string): string {
+  if (v.length < 12) return '***';
+  return `${v.slice(0, 8)}***${v.slice(-4)}`;
+}
 
 const app = new Hono();
 
@@ -305,6 +311,30 @@ app.post('/config/save', (c) => {
   } else {
     return c.json({ error: result.message }, 500);
   }
+});
+
+// === Client API keys ===
+
+app.get('/keys', (c) => {
+  return c.json({
+    keys: keysManager.list().map(k => ({ ...k, value: maskKey(k.value) }))
+  });
+});
+
+app.post('/keys', async (c) => {
+  const body = await c.req.json<{ name?: string }>();
+  const name = body.name?.trim();
+  if (!name) return c.json({ error: 'name is required' }, 400);
+  const result = keysManager.issueKey(name);
+  if (!result.ok || !result.key) return c.json({ error: result.message }, 400);
+  // The full value is exposed exactly once: in this response.
+  return c.json({ key: result.key }, 201);
+});
+
+app.delete('/keys/:name', (c) => {
+  const result = keysManager.revokeKey(c.req.param('name'));
+  if (!result.ok) return c.json({ error: result.message }, 404);
+  return c.json({ message: result.message });
 });
 
 export default app;

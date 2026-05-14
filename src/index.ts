@@ -3,6 +3,7 @@ import { logger } from 'hono/logger';
 import { cors } from 'hono/cors';
 import { serve } from '@hono/node-server';
 import { getConfig } from './config/index.ts';
+import { keysManager } from './services/keys.ts';
 
 // Import routes
 import openaiRoutes from './routes/openai.ts';
@@ -15,6 +16,22 @@ const app = new Hono();
 // Middleware
 app.use('*', logger());
 app.use('*', cors());
+
+// Client API key auth — gate /v1/* only. /admin/* and /health stay open
+// (daemon binds to 127.0.0.1 by default, so admin is local-only).
+app.use('/v1/*', async (c, next) => {
+  const xkey = c.req.header('x-api-key');
+  const auth = c.req.header('authorization');
+  const value = (xkey || auth?.replace(/^Bearer\s+/i, ''))?.trim();
+  if (!value) {
+    return c.json({ error: { type: 'authentication_error', message: 'Missing API key' } }, 401);
+  }
+  if (!keysManager.validate(value)) {
+    return c.json({ error: { type: 'authentication_error', message: 'Invalid API key' } }, 401);
+  }
+  keysManager.recordUse(value);
+  await next();
+});
 
 // Health check
 app.get('/', (c) => {

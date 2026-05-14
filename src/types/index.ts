@@ -108,3 +108,17 @@ export interface TokenUsage {
   inputTokens: number;
   outputTokens: number;
 }
+
+// Client-issued API keys (the keys clients use to call this local daemon).
+// Stored separately from config.yaml in ~/.airouter/keys.yaml.
+export interface ApiKey {
+  name: string;
+  value: string;       // 'air_' + 32 hex chars
+  created: string;     // ISO timestamp
+  lastUsed?: string;   // ISO timestamp, set on first use
+  requestCount: number;
+}
+
+export interface KeysFile {
+  keys: ApiKey[];
+}

@@ -1,7 +1,37 @@
 import blessed from 'blessed';
 import contrib from 'blessed-contrib';
+import { spawn } from 'child_process';
 
 const serverUrl = 'http://localhost:3000';
+
+// Copy text to the system clipboard. Tries native pbcopy/xclip/clip first;
+// falls back to OSC 52 escape sequence for terminals that allow it (iTerm2, kitty).
+function copyToClipboard(text: string): boolean {
+  const tools: { cmd: string; args: string[] }[] = [];
+  if (process.platform === 'darwin') tools.push({ cmd: 'pbcopy', args: [] });
+  else if (process.platform === 'win32') tools.push({ cmd: 'clip', args: [] });
+  else {
+    tools.push({ cmd: 'wl-copy', args: [] });
+    tools.push({ cmd: 'xclip', args: ['-selection', 'clipboard'] });
+    tools.push({ cmd: 'xsel', args: ['--clipboard', '--input'] });
+  }
+  for (const t of tools) {
+    try {
+      const p = spawn(t.cmd, t.args, { stdio: ['pipe', 'ignore', 'ignore'] });
+      p.stdin.write(text);
+      p.stdin.end();
+      return true;
+    } catch { /* try next */ }
+  }
+  // OSC 52 fallback — works in iTerm2, kitty, recent gnome-terminal with allow_blind_writes
+  try {
+    const b64 = Buffer.from(text, 'utf-8').toString('base64');
+    process.stdout.write(`\x1b]52;c;${b64}\x07`);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 const screen = blessed.screen({
   smartCSR: true,
@@ -35,7 +65,7 @@ function renderHint(): void {
   const def = currentRouting.defaultUpstream ?? '-';
   const stratLabel = s === 'manual' ? `${s} → ${def}` : s;
   hintBox.setContent(
-    `[↑↓] select   [a] add   [e] edit   [t] toggle   [d] delete   [m] measure   [r] routing   [q] quit\n` +
+    `[↑↓] select  [a] add  [e] edit  [t] toggle  [d] delete  [m] measure  [r] routing  [k] keys  [q] quit\n` +
     `{gray-fg}routing: ${stratLabel}{/}`
   );
   screen.render();
@@ -135,16 +165,73 @@ const formInput = blessed.textbox({
 });
 
 // ══════════════════════════════════════════
+//  Page 3: Keys management
+// ══════════════════════════════════════════
+
+const keysPage = blessed.box({
+  top: 0, left: 0, width: '100%', height: '100%',
+  hidden: true
+});
+screen.append(keysPage);
+
+const keysGrid = new contrib.grid({ rows: 12, cols: 12, screen: keysPage as any });
+
+const keysHint = keysGrid.set(0, 0, 2, 12, blessed.box, {
+  label: ' Client API Keys ',
+  content: '',
+  tags: true,
+  valign: 'middle',
+  border: { type: 'line', fg: '#555555' } as any,
+  style: { fg: '#999999', border: { fg: '#555555' }, label: { fg: '#cccccc' } },
+  padding: { left: 2 }
+});
+
+const keysTable = keysGrid.set(2, 0, 10, 12, contrib.table, {
+  keys: true,
+  tags: true,
+  fg: '#cccccc',
+  selectedBg: '#333333',
+  selectedFg: '#ffffff',
+  label: ' Keys ',
+  columnSpacing: 2,
+  columnWidth: [16, 28, 14, 14, 10],
+  border: { type: 'line', fg: '#555555' },
+  style: {
+    border: { fg: '#555555' },
+    header: { fg: '#999999', bold: true },
+    cell: { fg: '#cccccc' },
+    label: { fg: '#cccccc' }
+  }
+});
+
+let cachedKeys: any[] = [];
+
+// ══════════════════════════════════════════
 //  Page Management
 // ══════════════════════════════════════════
 
-let currentPage: 'dash' | 'form' = 'dash';
+let currentPage: 'dash' | 'form' | 'keys' = 'dash';
 
 function showDash(): void {
   formPage.hide();
+  keysPage.hide();
   dashPage.show();
   currentPage = 'dash';
   upstreamTable.focus();
+  screen.render();
+}
+
+async function showKeys(): Promise<void> {
+  dashPage.hide();
+  formPage.hide();
+  keysPage.show();
+  currentPage = 'keys';
+  keysHint.setContent(
+    `[a] issue   [d] revoke   [Esc] back to dashboard\n` +
+    `{gray-fg}~/.airouter/keys.yaml{/}`
+  );
+  await refreshKeys();
+  keysTable.focus();
   screen.render();
 }
 
@@ -365,6 +452,10 @@ screen.key(['down'], () => {
   if (currentPage === 'form' && !form.editing) formNavigate(1);
 });
 screen.key(['escape'], () => {
+  if (currentPage === 'keys') {
+    showDash();
+    return;
+  }
   if (currentPage !== 'form') return;
   // When editing, readInput handles Escape internally via its callback
   if (!form.editing) {
@@ -493,6 +584,190 @@ async function measureLatency(name: string): Promise<void> {
   } catch (err: any) {
     log(`{bold}✗ Measure error: ${err?.message || err}{/bold}`);
   }
+}
+
+// ─── Client API keys ────────────────────────────────────────────
+
+async function fetchKeys(): Promise<any[]> {
+  try {
+    const r = await fetch(`${serverUrl}/admin/keys`);
+    const data = await r.json() as any;
+    return data.keys || [];
+  } catch { return []; }
+}
+
+async function issueKeyAPI(name: string): Promise<any | null> {
+  try {
+    const r = await fetch(`${serverUrl}/admin/keys`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name })
+    });
+    const data = await r.json() as any;
+    return r.ok ? data.key : null;
+  } catch { return null; }
+}
+
+async function revokeKeyAPI(name: string): Promise<boolean> {
+  try {
+    const r = await fetch(`${serverUrl}/admin/keys/${encodeURIComponent(name)}`, { method: 'DELETE' });
+    return r.ok;
+  } catch { return false; }
+}
+
+function relativeTime(iso?: string): string {
+  if (!iso) return '-';
+  const ms = Date.now() - new Date(iso).getTime();
+  if (ms < 0) return '-';
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return `${s}s ago`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  return `${d}d ago`;
+}
+
+async function refreshKeys(): Promise<void> {
+  cachedKeys = await fetchKeys();
+  keysTable.setData({
+    headers: ['Name', 'Key', 'Created', 'Last Used', 'Requests'],
+    data: cachedKeys.map((k: any) => [
+      k.name,
+      k.value,
+      relativeTime(k.created),
+      relativeTime(k.lastUsed),
+      String(k.requestCount ?? 0)
+    ])
+  });
+  screen.render();
+}
+
+function getSelectedKey(): any | null {
+  const idx = (keysTable as any).rows?.selected ?? -1;
+  return cachedKeys[idx] || null;
+}
+
+// Yes/No confirm dialog with arrow-key navigable buttons.
+// Defaults selection to "Cancel" (safe choice for destructive actions).
+function confirmDialog(question: string, onChoice: (ok: boolean) => void): void {
+  let selected: 'cancel' | 'ok' = 'cancel';
+  const width = Math.max(44, question.length + 8);
+  const box = blessed.box({
+    parent: screen,
+    top: 'center', left: 'center',
+    width, height: 8,
+    label: ' Confirm ',
+    border: { type: 'line', fg: '#777777' } as any,
+    style: { fg: '#cccccc', border: { fg: '#777777' }, label: { fg: '#cccccc' } },
+    tags: true,
+    padding: { left: 1, right: 1 },
+    keys: true,
+    keyable: true
+  });
+  const render = () => {
+    const ok = selected === 'ok'
+      ? '{black-fg}{white-bg}  OK  {/}'
+      : '  OK  ';
+    const cancel = selected === 'cancel'
+      ? '{black-fg}{white-bg}  Cancel  {/}'
+      : '  Cancel  ';
+    box.setContent(
+      `\n  ${question}\n\n` +
+      `       ${cancel}     ${ok}\n\n` +
+      `  {gray-fg}[←/→] select  [Enter] confirm  [Esc] cancel{/}`
+    );
+    screen.render();
+  };
+  const dismiss = (ok: boolean) => {
+    box.detach();
+    screen.render();
+    onChoice(ok);
+  };
+  box.key(['left', 'h'], () => { selected = 'cancel'; render(); });
+  box.key(['right', 'l'], () => { selected = 'ok'; render(); });
+  box.key(['tab'], () => { selected = selected === 'ok' ? 'cancel' : 'ok'; render(); });
+  box.key(['return'], () => dismiss(selected === 'ok'));
+  box.key(['escape'], () => dismiss(false));
+  box.key(['y'], () => dismiss(true));
+  box.key(['n'], () => dismiss(false));
+  render();
+  box.focus();
+}
+
+// One-shot prompt for an issue-key name. Calls onSubmit(value) on Enter,
+// or onSubmit(null) on Escape.
+function promptKeyName(onSubmit: (value: string | null) => void): void {
+  const box = blessed.box({
+    parent: screen,
+    top: 'center', left: 'center',
+    width: 50, height: 7,
+    label: ' Issue new key ',
+    border: { type: 'line', fg: '#777777' } as any,
+    style: { fg: '#cccccc', border: { fg: '#777777' }, label: { fg: '#cccccc' } },
+    tags: true,
+    padding: { left: 1, right: 1 }
+  });
+  blessed.text({
+    parent: box,
+    top: 0, left: 0,
+    content: 'Name (e.g. my-laptop):',
+    style: { fg: '#aaaaaa' }
+  });
+  const input = blessed.textbox({
+    parent: box,
+    top: 2, left: 0, width: '100%-4', height: 1,
+    style: { bg: '#333333', fg: '#ffffff', focus: { bg: '#444444' } },
+    inputOnFocus: false
+  });
+  input.focus();
+  screen.render();
+  (input.readInput as any)((_err: any, value: string | null) => {
+    box.detach();
+    screen.render();
+    onSubmit(value != null ? value.trim() : null);
+  });
+}
+
+// Reveal modal: shows the just-issued key value once. Closed by Enter or Escape.
+function revealNewKey(name: string, value: string, onClose: () => void): void {
+  const box = blessed.box({
+    parent: screen,
+    top: 'center', left: 'center',
+    width: Math.max(60, value.length + 8),
+    height: 9,
+    label: ` Key issued: ${name} `,
+    border: { type: 'line', fg: '#33aa33' } as any,
+    style: { fg: '#cccccc', border: { fg: '#33aa33' }, label: { fg: '#aaffaa' } },
+    tags: true,
+    padding: { left: 1, right: 1 },
+    keys: true,
+    keyable: true
+  });
+  const baseHint = `  {gray-fg}[c] copy   [Enter]/[Esc] dismiss   (full value shown only once){/}`;
+  const render = (hint: string) => {
+    box.setContent(
+      `\n  {bold}{white-fg}${value}{/white-fg}{/bold}\n\n` +
+      `${hint}`
+    );
+    screen.render();
+  };
+  render(baseHint);
+  box.focus();
+  const dismiss = () => {
+    box.detach();
+    screen.render();
+    onClose();
+  };
+  box.key(['return', 'escape'], dismiss);
+  box.key(['c'], () => {
+    const ok = copyToClipboard(value);
+    render(ok
+      ? `  {green-fg}✓ Copied to clipboard{/}   {gray-fg}[Enter]/[Esc] dismiss{/}`
+      : `  {red-fg}✗ Copy failed{/}   {gray-fg}select text manually, then [Enter]/[Esc] dismiss{/}`
+    );
+  });
 }
 
 // ─── Routing config ─────────────────────────────────────────────
@@ -766,8 +1041,30 @@ screen.key(['m'], async () => {
 
 
 screen.key(['a'], () => {
-  if (currentPage !== 'dash') return;
-  showForm('add');
+  if (currentPage === 'dash') {
+    showForm('add');
+    return;
+  }
+  if (currentPage === 'keys') {
+    promptKeyName(async (name) => {
+      if (!name) {
+        keysTable.focus();
+        screen.render();
+        return;
+      }
+      const issued = await issueKeyAPI(name);
+      if (!issued) {
+        keysTable.focus();
+        screen.render();
+        return;
+      }
+      revealNewKey(issued.name, issued.value, async () => {
+        await refreshKeys();
+        keysTable.focus();
+        screen.render();
+      });
+    });
+  }
 });
 
 screen.key(['return'], async () => {
@@ -778,30 +1075,33 @@ screen.key(['return'], async () => {
 });
 
 screen.key(['d'], () => {
-  if (currentPage !== 'dash') return;
-  const u = getSelectedUpstream();
-  if (!u) return;
-
-  const confirm = blessed.question({
-    top: 'center',
-    left: 'center',
-    width: 40,
-    height: 7,
-    tags: true,
-    border: { type: 'line', fg: '#777777' } as any,
-    style: { fg: '#cccccc', border: { fg: '#777777' } },
-    label: ' Confirm ',
-  });
-  screen.append(confirm);
-  (confirm.ask as any)(`Delete "${u.name}"?`, async (_err: any, ok: boolean) => {
-    confirm.detach();
-    screen.render();
-    if (ok) {
+  if (currentPage === 'dash') {
+    const u = getSelectedUpstream();
+    if (!u) return;
+    confirmDialog(`Delete "${u.name}"?`, async (ok) => {
+      if (!ok) return;
       await deleteUpstream(u.name);
       await autoSave();
       await refresh();
-    }
-  });
+    });
+    return;
+  }
+
+  if (currentPage === 'keys') {
+    const k = getSelectedKey();
+    if (!k) return;
+    confirmDialog(`Revoke key "${k.name}"?`, async (ok) => {
+      if (!ok) return;
+      await revokeKeyAPI(k.name);
+      await refreshKeys();
+      keysTable.focus();
+    });
+  }
+});
+
+screen.key(['k'], async () => {
+  if (currentPage !== 'dash') return;
+  await showKeys();
 });
 
 
