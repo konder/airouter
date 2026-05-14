@@ -102,16 +102,6 @@ upstreams:
     weight: 1
     enabled: true
 
-  - name: idealab
-    type: anthropic
-    baseurl: https://idealab.example.com/api/code
-    key: xxx
-    model: claude-opus-4-7
-    group: claude
-    authStyle: bearer        # 默认 x-api-key；改 bearer 走 Authorization: Bearer
-    weight: 1
-    enabled: true
-
 routing:
   strategy: load-balance     # load-balance | rules | manual
   defaultGroup: glm          # 没匹配到时的兜底 group
