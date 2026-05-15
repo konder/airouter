@@ -1,7 +1,7 @@
 {
-  "name": "airouter",
+  "name": "@konder/airouter",
   "version": "1.0.0",
-  "description": "Local AI API gateway for managing multiple upstream providers",
+  "description": "Local AI API gateway — unify multiple OpenAI/Anthropic upstreams behind a single base URL with TUI, failover, weighted load balance and group-based routing.",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
@@ -9,8 +9,36 @@
   },
   "files": [
     "dist",
-    "config.yaml"
+    "config.yaml",
+    "README.md"
   ],
+  "keywords": [
+    "ai",
+    "openai",
+    "anthropic",
+    "claude",
+    "gateway",
+    "proxy",
+    "router",
+    "load-balancer",
+    "cli",
+    "tui"
+  ],
+  "homepage": "https://github.com/konder/airouter#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/konder/airouter.git"
+  },
+  "bugs": {
+    "url": "https://github.com/konder/airouter/issues"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc --noCheck",
@@ -19,7 +47,8 @@
     "tui": "tsx src/tui/index.ts",
     "test": "vitest run",
     "test:watch": "vitest",
-    "prepare": "npm run build"
+    "prepare": "npm run build",
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
     "@hono/node-server": "^1.19.14",

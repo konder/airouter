@@ -19,15 +19,15 @@
 
 ## 安装
 
-### 从 GitHub 安装（推荐）
+### 从 npm（推荐）
 
 ```bash
-npm install -g git+https://github.com/konder/airouter.git
+npm install -g @konder/airouter
 ```
 
-`prepare` 钩子会自动 `npm run build`，装完即可用 `airouter` 命令。
+要求 Node 22+。装完即可用 `airouter` 命令。
 
-### 从源码安装
+### 从源码
 
 ```bash
 git clone https://github.com/konder/airouter.git
