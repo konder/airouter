@@ -41,7 +41,7 @@
   },
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc --noCheck",
+    "build": "tsc --noCheck && chmod +x dist/cli/index.js",
     "typecheck": "tsc --noEmit",
     "start": "node dist/index.js",
     "tui": "tsx src/tui/index.ts",
