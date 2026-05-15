@@ -1,6 +1,6 @@
 {
   "name": "@konder/airouter",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Local AI API gateway — unify multiple OpenAI/Anthropic upstreams behind a single base URL with TUI, failover, weighted load balance and group-based routing.",
   "type": "module",
   "main": "dist/index.js",
